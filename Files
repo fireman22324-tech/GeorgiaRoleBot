@@ -1,3 +1,4 @@
+
 const {
   Client,
   GatewayIntentBits,
@@ -148,21 +149,3 @@ client.on("interactionCreate", async interaction => {
 });
 
 client.login(DISCORD_TOKEN);
-
-{
-  "name": "georgiarolebot",
-  "version": "1.0.0",
-  "description": "Owner-only Discord role management bot",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "discord.js": "^14.19.3"
-  }
-}
-
-
