@@ -1,0 +1,168 @@
+const {
+  Client,
+  GatewayIntentBits,
+  SlashCommandBuilder,
+  REST,
+  Routes,
+  PermissionFlagsBits
+} = require("discord.js");
+
+const required = ["DISCORD_TOKEN", "CLIENT_ID", "GUILD_ID", "OWNER_ID"];
+for (const name of required) {
+  if (!process.env[name]) {
+    console.error(`Missing environment variable: ${name}`);
+    process.exit(1);
+  }
+}
+
+const { DISCORD_TOKEN, CLIENT_ID, GUILD_ID, OWNER_ID } = process.env;
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName("giveallroles")
+    .setDescription("Give yourself every role the bot is allowed to assign."),
+  new SlashCommandBuilder()
+    .setName("removeallroles")
+    .setDescription("Remove your assignable roles (keeps @everyone)."),
+  new SlashCommandBuilder()
+    .setName("rolecount")
+    .setDescription("Count the roles in this server.")
+].map(command => command.toJSON());
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  try {
+    const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: commands }
+    );
+    console.log("Guild slash commands registered.");
+  } catch (error) {
+    console.error("Could not register slash commands:", error);
+  }
+});
+
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.user.id !== OWNER_ID) {
+    return interaction.reply({
+      content: "Sorry, only the bot owner can use GeorgiaRolebot commands.",
+      ephemeral: true
+    });
+  }
+
+  if (!interaction.inGuild() || interaction.guildId !== GUILD_ID) {
+    return interaction.reply({
+      content: "This command only works in the configured server.",
+      ephemeral: true
+    });
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const guild = interaction.guild;
+    const member = await guild.members.fetch(interaction.user.id);
+    const botMember = await guild.members.fetchMe();
+
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      return interaction.editReply(
+        "I need the **Manage Roles** permission. Please enable it for my bot role."
+      );
+    }
+
+    const assignableRoles = (await guild.roles.fetch())
+      .filter(role =>
+        role.id !== guild.id &&
+        !role.managed &&
+        role.editable &&
+        role.position < botMember.roles.highest.position
+      )
+      .sort((a, b) => a.position - b.position);
+
+    if (interaction.commandName === "rolecount") {
+      const total = (await guild.roles.fetch()).size - 1;
+      return interaction.editReply(
+        `This server has **${Math.max(total, 0)}** roles (excluding @everyone).`
+      );
+    }
+
+    if (interaction.commandName === "giveallroles") {
+      let added = 0;
+      let skipped = 0;
+
+      for (const role of assignableRoles.values()) {
+        if (member.roles.cache.has(role.id)) {
+          skipped++;
+          continue;
+        }
+        try {
+          await member.roles.add(role, "GeorgiaRolebot owner-only giveallroles");
+          added++;
+        } catch (error) {
+          skipped++;
+          console.error(`Could not add role ${role.name}:`, error.message);
+        }
+      }
+
+      return interaction.editReply(
+        `Finished! Added **${added}** roles. Already held or unavailable: **${skipped}**.`
+      );
+    }
+
+    if (interaction.commandName === "removeallroles") {
+      let removed = 0;
+      let skipped = 0;
+
+      for (const role of assignableRoles.values()) {
+        if (!member.roles.cache.has(role.id)) continue;
+        try {
+          await member.roles.remove(role, "GeorgiaRolebot owner-only removeallroles");
+          removed++;
+        } catch (error) {
+          skipped++;
+          console.error(`Could not remove role ${role.name}:`, error.message);
+        }
+      }
+
+      return interaction.editReply(
+        `Finished! Removed **${removed}** roles. Roles that could not be removed: **${skipped}**.`
+      );
+    }
+  } catch (error) {
+    console.error(error);
+    return interaction.editReply(
+      "Something went wrong. Check the Railway logs and make sure the bot has Manage Roles."
+    );
+  }
+});
+
+client.login(DISCORD_TOKEN);
+
+{
+  "name": "georgiarolebot",
+  "version": "1.0.0",
+  "description": "Owner-only Discord role management bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3"
+  }
+}
+
+
